@@ -12,6 +12,8 @@ Neural Network and a Convoluted Neural Network. Furthermore, we will
 design the ensemble support system described in the assignment. For the
 Python-code follow this link: \[INSERT LINK\].
 
+# PART 1: Support Vector Machine, Naive Bayes & Logistic Regression.
+
 ## Step 0: Loading packages
 
 ``` r
@@ -28,8 +30,8 @@ loading_data <- function(path) {
   read_delim(path, "\t", escape_double = FALSE, trim_ws = TRUE)
 }
 
-# Loading the training- and testing data ("corpus" & "testing", respectively):
-corpus <- loading_data("offenseval-da-training-v1.tsv") %>% 
+# Loading the training- and testing data:
+training <- loading_data("offenseval-da-training-v1.tsv") %>% 
           mutate(Id = id,label = factor(subtask_a),text=tweet) %>% 
           na.omit()
 ```
@@ -63,21 +65,21 @@ testing<-loading_data("offenseval-da-test-v1.tsv") %>%
 
 ``` r
 # Make text lowercase
-corpus$text<-tolower(corpus$text) 
+training$text<-tolower(training$text) 
 
 # Remove stopwords:
 stopwords_regex = paste(stopwords("da",source= "snowball"), collapse = '\\b|\\b')
 stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
-corpus$text = stringr::str_replace_all(corpus$text, stopwords_regex, '')
+training$text = stringr::str_replace_all(training$text, stopwords_regex, '')
 
 # Eemove numbers:
-corpus$text <-  removeNumbers(corpus$text)
+training$text <-  removeNumbers(training$text)
 
 # Stem words:
-corpus$text <-  wordStem(corpus$text, language = "danish")
+training$text <-  wordStem(training$text, language = "danish")
 
 # remove punctuation
-corpus$text<-removePunctuation(corpus$text)
+training$text<-removePunctuation(training$text)
 
 #repeat same procedures for test data
 testing$text<-tolower(testing$text) 
@@ -89,15 +91,11 @@ testing$text <-  wordStem(testing$text, language = "danish")
 testing$text<-removePunctuation(testing$text)
 
 # Remove original data columns:
-corpus<-corpus[,4:6]
+training<-training[,4:6]
 testing<-testing[,4:6]
 
-# Make new dataframes to avoid overwriting:
-training_set <- corpus
-test_set <- testing
-
 #Inspect training data:
-head(corpus)
+head(training)
 ```
 
     ## # A tibble: 6 x 3
@@ -116,17 +114,36 @@ We start off creating the text treatment recipe:
 
 ``` r
 # Create text recipe:
-text_recipe <- recipe(label ~ ., data = training_set) %>% 
+text_recipe_NB <- recipe(label ~ ., data = training) %>% 
   update_role(Id, new_role = "ID") %>% 
   step_tokenize(text, engine = "spacyr", token = "words") %>%
  ## step_stopwords(text) %>% 
   step_lemma(text) %>%
   step_tokenfilter(text, max_tokens = 100) %>%
   step_tfidf(text)
+
+# Create text recipe:
+text_recipe_SVM <- recipe(label ~ ., data = training) %>% 
+  update_role(Id, new_role = "ID") %>% 
+  step_tokenize(text, engine = "spacyr", token = "words") %>%
+ ## step_stopwords(text) %>% 
+  step_lemma(text) %>%
+  step_tokenfilter(text, max_tokens = 100) %>%
+  step_tfidf(text)
+
+# Create text recipe:
+text_recipe_LOG <- recipe(label ~ ., data = training) %>% 
+  update_role(Id, new_role = "ID") %>% 
+  step_tokenize(text, engine = "spacyr", token = "words") %>%
+ ## step_stopwords(text) %>% 
+  step_lemma(text) %>%
+  step_tokenfilter(text, max_tokens = 100) %>%
+  step_tfidf(text)
+
 #
 
 # NGRAM recipie
-#text_recipe <- recipe(label ~ ., data = training_set) %>% 
+#text_recipe <- recipe(label ~ ., data = training) %>% 
  # update_role(Id, new_role = "ID") %>% 
   #step_tokenize(text) %>%
   #step_ngram(text, num_tokens = 5) %>%
@@ -157,16 +174,16 @@ We combine the model and the text processing recipe using
 worksflows:
 
 ``` r
-text_model_log_wf <- workflows::workflow() %>% add_recipe(text_recipe) %>% add_model(text_model_log_spec)
-text_model_NB_wf <- workflows::workflow() %>% add_recipe(text_recipe) %>% add_model(text_model_NB_spec)
-text_model_svm_wf <- workflows::workflow() %>% add_recipe(text_recipe) %>% add_model(text_model_svm_spec)
+text_model_log_wf <- workflows::workflow() %>% add_recipe(text_recipe_LOG) %>% add_model(text_model_log_spec)
+text_model_NB_wf <- workflows::workflow() %>% add_recipe(text_recipe_NB) %>% add_model(text_model_NB_spec)
+text_model_svm_wf <- workflows::workflow() %>% add_recipe(text_recipe_SVM) %>% add_model(text_model_svm_spec)
 ```
 
 ## Step 4: Fitting:
 
 ``` r
 #Fit the models on the training data:
-fit_log_model <- fit(text_model_log_wf, training_set)
+fit_log_model <- fit(text_model_log_wf, training)
 ```
 
     ## Found 'spacy_condaenv'. spacyr will use this environment
@@ -178,8 +195,8 @@ fit_log_model <- fit(text_model_log_wf, training_set)
     ## Warning: glm.fit: fitted probabilities numerically 0 or 1 occurred
 
 ``` r
-fit_NB_model <- fit(text_model_NB_wf, training_set)
-fit_svm_model <- fit(text_model_svm_wf, training_set)
+fit_NB_model <- fit(text_model_NB_wf, training)
+fit_svm_model <- fit(text_model_svm_wf, training)
 ```
 
     ##  Setting default kernel parameters
@@ -189,22 +206,22 @@ fit_svm_model <- fit(text_model_svm_wf, training_set)
 We make the models predict the classes of the test data:
 
 ``` r
-predictions_log <- predict(fit_log_model, test_set) # Classifications
-predictions_log$raw_log <- predict(fit_log_model, test_set,type="prob") # Raw probabilities
+predictions_log <- predict(fit_log_model, testing) # Classifications
+predictions_log$raw_log <- predict(fit_log_model, testing,type="prob") # Raw probabilities
 
-predictions_NB <- predict(fit_NB_model, test_set,type="class") # Classifications
-predictions_NB$raw_NB <- predict(fit_NB_model, test_set,type="prob") # Raw probabilities
+predictions_NB <- predict(fit_NB_model, testing,type="class") # Classifications
+predictions_NB$raw_NB <- predict(fit_NB_model, testing,type="prob") # Raw probabilities
 
-predictions_SVM <- stats::predict(fit_svm_model, test_set,type="class") # Classifications
-predictions_SVM$raw_svm <- stats::predict(fit_svm_model, test_set,type="prob") # Raw probabilities
+predictions_SVM <- stats::predict(fit_svm_model, testing,type="class") # Classifications
+predictions_SVM$raw_svm <- stats::predict(fit_svm_model, testing,type="prob") # Raw probabilities
 ```
 
 ## Step 6: Evaluate
 
-# Logistic Regression:
+### Logistic Regression:
 
 ``` r
-bind_cols(test_set,predictions_log) %>% accuracy(truth = label, estimate = .pred_class)
+bind_cols(testing,predictions_log) %>% accuracy(truth = label, estimate = .pred_class)
 ```
 
     ## # A tibble: 1 x 3
@@ -213,7 +230,7 @@ bind_cols(test_set,predictions_log) %>% accuracy(truth = label, estimate = .pred
     ## 1 accuracy binary         0.881
 
 ``` r
-bind_cols(test_set,predictions_log) %>% conf_mat(label, .pred_class) 
+bind_cols(testing,predictions_log) %>% conf_mat(label, .pred_class) 
 ```
 
     ##           Truth
@@ -221,10 +238,10 @@ bind_cols(test_set,predictions_log) %>% conf_mat(label, .pred_class)
     ##        NOT 285  36
     ##        OFF   3   5
 
-# Naive Bayes
+### Naive Bayes
 
 ``` r
-bind_cols(test_set,predictions_NB) %>% accuracy(truth = label, estimate = .pred_class)
+bind_cols(testing,predictions_NB) %>% accuracy(truth = label, estimate = .pred_class)
 ```
 
     ## # A tibble: 1 x 3
@@ -233,7 +250,7 @@ bind_cols(test_set,predictions_NB) %>% accuracy(truth = label, estimate = .pred_
     ## 1 accuracy binary         0.815
 
 ``` r
-bind_cols(test_set,predictions_NB) %>% conf_mat(label, .pred_class) 
+bind_cols(testing,predictions_NB) %>% conf_mat(label, .pred_class) 
 ```
 
     ##           Truth
@@ -241,10 +258,10 @@ bind_cols(test_set,predictions_NB) %>% conf_mat(label, .pred_class)
     ##        NOT 265  38
     ##        OFF  23   3
 
-SVM
+### SVM
 
 ``` r
-bind_cols(test_set,predictions_SVM) %>% accuracy(truth = label, estimate = .pred_class)
+bind_cols(testing,predictions_SVM) %>% accuracy(truth = label, estimate = .pred_class)
 ```
 
     ## # A tibble: 1 x 3
@@ -253,7 +270,7 @@ bind_cols(test_set,predictions_SVM) %>% accuracy(truth = label, estimate = .pred
     ## 1 accuracy binary         0.891
 
 ``` r
-bind_cols(test_set,predictions_SVM) %>% conf_mat(label, .pred_class) 
+bind_cols(testing,predictions_SVM) %>% conf_mat(label, .pred_class) 
 ```
 
     ##           Truth
@@ -261,88 +278,20 @@ bind_cols(test_set,predictions_SVM) %>% conf_mat(label, .pred_class)
     ##        NOT 288  36
     ##        OFF   0   5
 
-## Neural Networks:
+\#Part 2: Neural Networks.
 
-## Step 1: Loading data
-
-``` r
-loading_data <- function(path) {
-  read_delim(path, "\t", escape_double = FALSE, trim_ws = TRUE)
-}
-
-training <- loading_data("offenseval-da-training-v1.tsv") %>% 
-          mutate(Id = id,tag = factor(subtask_a),text=tweet) %>% 
-          na.omit()
-```
-
-    ## Parsed with column specification:
-    ## cols(
-    ##   id = col_double(),
-    ##   tweet = col_character(),
-    ##   subtask_a = col_character()
-    ## )
-
-    ## Warning: 2 parsing failures.
-    ##  row col               expected              actual                            file
-    ## 2961  id no trailing characters     [deleted]   NOT 'offenseval-da-training-v1.tsv'
-    ## 2961  -- 3 columns              1 columns           'offenseval-da-training-v1.tsv'
+## Step 1: Preprocessing:
 
 ``` r
-testing<-loading_data("offenseval-da-test-v1.tsv") %>% 
-          mutate(Id = id,tag = factor(subtask_a),text=tweet) %>% 
-          na.omit()
-```
-
-    ## Parsed with column specification:
-    ## cols(
-    ##   id = col_double(),
-    ##   tweet = col_character(),
-    ##   subtask_a = col_character()
-    ## )
-
-## Step 2: Preprocessing:
-
-``` r
-# Make text lowercase:
-training$text<-tolower(training$text) 
-
-# Remove stopwords
-stopwords_regex = paste(stopwords("da",source= "snowball"), collapse = '\\b|\\b')
-stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
-training$text = stringr::str_replace_all(training$text, stopwords_regex, '')
-
-# Remove numbers
-training$text <-  removeNumbers(training$text)
-
-# Stem words
-training$text <-  wordStem(training$text, language = "danish")
-
-# Remove punctuatuin:
-training$text<-removePunctuation(training$text)
-
-# Repeat for test data
-testing$text<-tolower(testing$text) 
-stopwords_regex = paste(stopwords("da",source= "snowball"), collapse = '\\b|\\b')
-stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
-testing$text = stringr::str_replace_all(testing$text, stopwords_regex, '')
-testing$text <-  removeNumbers(testing$text)
-testing$text <-  wordStem(testing$text, language = "danish")
-testing$text<-removePunctuation(testing$text)
-
-# Remove original columns
-training<-training[,4:6]
-testing<-testing[,4:6]
-
-# Turn labels into factors to make it interpretable by Keras:
-training$tag<-as.numeric(training$tag)-1
-testing$tag<-as.numeric(testing$tag)-1
+training$label<-as.numeric(training$label)-1
+testing$label<-as.numeric(testing$label)-1
 
 # Inspect training data:
 head(training)
 ```
 
     ## # A tibble: 6 x 3
-    ##      Id   tag text                                                              
+    ##      Id label text                                                              
     ##   <dbl> <dbl> <chr>                                                             
     ## 1  3131     0 " tror    dejlig køligt        svært såfremt personen  billedet  ~
     ## 2   711     0 "så kommer  nok   investere   ny cykelpumpe så landbetjenten kan ~
@@ -534,7 +483,7 @@ bla bla bla
 
 ``` r
 # Train
-y_train <- training$tag
+y_train <- training$label
 length(y_train)
 ```
 
@@ -542,7 +491,7 @@ length(y_train)
 
 ``` r
 # Test
-y_test <- testing$tag
+y_test <- testing$label
 length(y_test)
 ```
 
@@ -569,35 +518,30 @@ model_lstm %>%
 model_lstm %>% compile(
   loss = 'binary_crossentropy',
   optimizer = 'adam',
-  metrics = c('accuracy')
+  metrics = c('accuracy', "Precision", "Recall")
 )
 ```
 
 ## Step 2: Fit model:
 
 ``` r
-model_lstm %>% fit(
+history_lstm <- model_lstm %>% fit(
   x_train, y_train,
   batch_size = batch_size,
-  epochs = 5,
+  epochs = 10,
   validation_data = list(x_test, y_test)
 )
+
+plot(history_lstm,method= "ggplot2", smooth = TRUE)
 ```
+
+    ## `geom_smooth()` using formula 'y ~ x'
+
+![](Automatic-Offensive-Language-Detection-In-Danish_files/figure-gfm/unnamed-chunk-18-1.png)<!-- -->
 
 ## Step 3: Evaluate:
 
 ``` r
-scores <- model_lstm %>% tensorflow::evaluate(
-  x_test, y_test,
-  batch_size = batch_size
-)
-
-
-#y_test
-#x_test
-
-#testing$predict<-predict_classes(model, testing$tag)
-
 neural_probs <- data.frame(predict_LSTM = predict_classes(model_lstm, x_test))
 neural_probs$raw_probs_off_LSTM<-predict_proba(model_lstm, x_test)
 neural_probs$raw_probs_not_LSTM<-1-neural_probs$raw_probs_off_LSTM
@@ -694,20 +638,21 @@ model_cnn %>% compile(
 ## Step 2: Fit model:
 
 ``` r
-model_cnn %>% fit(
+history_cnn <- model_cnn %>% fit(
   x_train, y_train,
   batch_size = batch_size,
-  epochs = epochs,
+  epochs = 10,
   validation_data = list(x_test, y_test)
 )
+
+plot(history_cnn,method= "ggplot2", smooth = TRUE)
 ```
 
-``` r
-scores <- model_cnn %>% tensorflow::evaluate(
-  x_test, y_test,
-  batch_size = batch_size
-)
+    ## `geom_smooth()` using formula 'y ~ x'
 
+![](Automatic-Offensive-Language-Detection-In-Danish_files/figure-gfm/unnamed-chunk-25-1.png)<!-- -->
+
+``` r
 neural_probs$predict_CNN<-predict_classes(model_cnn, x_test) #Predict class
 neural_probs$raw_probs_off_CNN<-predict_proba(model_cnn, x_test) #Predict raw probabilites (prob of tweet = OFF)
 neural_probs$raw_probs_not_CNN<-1-neural_probs$raw_probs_off_CNN
@@ -773,13 +718,19 @@ callback_reduce_lr_on_plateau(
 
 ``` r
 # Train model over four epochs
-model_bilstm %>% fit(
+history_bilstm <- model_bilstm %>% fit(
   x_train, y_train,
   batch_size = batch_size,
-  epochs = 5,
+  epochs = 10,
   validation_data = list(x_test, y_test)
 )
+
+plot(history_bilstm,method= "ggplot2", smooth = TRUE)
 ```
+
+    ## `geom_smooth()` using formula 'y ~ x'
+
+![](Automatic-Offensive-Language-Detection-In-Danish_files/figure-gfm/unnamed-chunk-32-1.png)<!-- -->
 
 ## Step 3: Evaluate
 
@@ -846,2653 +797,16 @@ Ensemble_probabilities$bert_not<-Bert_results$`0`
 #  testing$avg_preds[i] <- ifelse(testing$ensemble_probs_off[i] > 0.5, 1, 0)
 #  }
 
-
 #Calculating average OFF BERT+Ensemble prob
 for (i in 1:nrow(Ensemble_probabilities)){
-  Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i] + Bert_results$`1`[i] + Ensemble_probabilities$cnn_pred_off + Ensemble_probabilities$lstm_pred_off + Ensemble_probabilities$bilstm_pred_off) / 7
+Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i] + Bert_results$`1`[i] + Ensemble_probabilities$cnn_pred_off[i] + Ensemble_probabilities$lstm_pred_off[i] + Ensemble_probabilities$bilstm_pred_off[i]) / 7
 }
-```
 
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_OFF[i] + : number of items to replace is not a
-    ## multiple of replacement length
-
-``` r
 #Calculating average NOT BERT+Ensemble prob and making binary classification
 for (i in 1:nrow(Ensemble_probabilities)){
-  Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i] + Bert_results$`0`[i] + Ensemble_probabilities$cnn_pred_not + Ensemble_probabilities$lstm_pred_not + Ensemble_probabilities$bilstm_pred_not) / 7
+Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i] + Bert_results$`0`[i] + Ensemble_probabilities$cnn_pred_not[i] + Ensemble_probabilities$lstm_pred_not[i] + Ensemble_probabilities$bilstm_pred_not[i]) / 7
 }
-```
 
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-    
-    ## Warning in Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <-
-    ## (Ensemble_probabilities$SVM$.pred_NOT[i] + : number of items to replace is not a
-    ## multiple of replacement length
-
-``` r
 for (i in 1:nrow(Ensemble_probabilities)){
 Ensemble_probabilities$avg_preds_bert_plus_ensemble[i] <- ifelse(Ensemble_probabilities$ensemble_plus_bert_probs_off[i] > 0.5, 1, 0)
 }
@@ -3514,7 +828,7 @@ for (i in 1:nrow(testing)){
 for (i in 1:nrow(testing)){
   testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_not[i] > 0.5 & Ensemble_probabilities$bert_not[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
 }
-
+  
 # How many changed classifications:
 length(Ensemble_probabilities$bertpreds[Ensemble_probabilities$bertpreds==1])
 ```
@@ -3526,74 +840,3 @@ length(testing$support_system[testing$support_system==1])
 ```
 
     ## [1] 36
-
-\#\#TEST only with NB (to see if 151 changes)
-
-``` r
-#Load BERT data:
-#Bert_results<-read_csv("OG_BERT_RESULTS.csv")
-#testing$BERT_not_prob<-Bert_results$`0`
-#testing$BERT_off_prob<-Bert_results$`1`
-
-#Create ensemble with raw probs of other models:
-#Ensemble_probabilities<-predictions_NB$raw_NB
-#Ensemble_probabilities$SVM<-predictions_SVM$raw_svm
-#Ensemble_probabilities<-Ensemble_probabilities[,3]
-#Ensemble_probabilities$NB<-predictions_NB$raw_NB
-#Ensemble_probabilities$log<-predictions_log$raw_log
-
-
-#Define empty columns in testing set
-#Ensemble_probabilities$ensemble_plus_bert_probs_off<-1
-#Ensemble_probabilities$ensemble_plus_bert_probs_not<-1
-#Ensemble_probabilities$avg_preds_bert_plus_ensemble<-1
-#testing$support_system<-1
-#Ensemble_probabilities$bertpreds<-1
-#Ensemble_probabilities$bert_off<-Bert_results$`1`
-#Ensemble_probabilities$bert_not<-Bert_results$`0`
-
-
-#Calculating average OFF prob and class prediction
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  Ensemble_probabilities$ensemble_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i]) / 3
-#}
-
-#Calculating average NOT prob
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  testing$ensemble_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i]) / 3
-#  testing$avg_preds[i] <- ifelse(testing$ensemble_probs_off[i] > 0.5, 1, 0)
-#  }
-
-
-#Calculating average OFF BERT+Ensemble prob
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <- #(Ensemble_probabilities$NB$.pred_OFF[i] + Bert_results$`1`[i]) / 2
-#}
-
-#Calculating average NOT BERT+Ensemble prob and making binary classification
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <- #(Ensemble_probabilities$NB$.pred_NOT[i] + Bert_results$`0`[i]) / 2
-#  Ensemble_probabilities$avg_preds_bert_plus_ensemble[i] <- ifelse(Ensemble_probabilities$ensemble_plus_bert_probs_off[i] > 0.5, 1, 0)
-#}
-
-#Calculate binary BERT classification
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  Ensemble_probabilities$bertpreds[i] <- ifelse(Ensemble_probabilities$bert_off[i] > 0.5, 1, 0)
-#}
-
-##ENSEMBLE SUPPORT SYSTEM##
-
-# Making support system integrating "unsure" offensive classifications (by BERT)
-#for (i in 1:nrow(testing)){
-#  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_off[i] > 0.5 & Ensemble_probabilities$bert_off[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
-#}
-
-# Same but for NOT
-#for (i in 1:nrow(testing)){
-#  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_not[i] > 0.5 & Ensemble_probabilities$bert_not[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
-#}
-
-#(Ensemble_probabilities$SVM$.pred_NOT[151]+Ensemble_probabilities$NB$.pred_NOT[151]+Ensemble_probabilities$log$.pred_NOT[151])/3
-
-#(Ensemble_probabilities$SVM$.pred_OFF[151]+Ensemble_probabilities$NB$.pred_OFF[151]+Ensemble_probabilities$log$.pred_OFF[151])/3
-```
