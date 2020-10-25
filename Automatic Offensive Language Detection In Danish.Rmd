@@ -3,67 +3,78 @@ title: "Automatic Offensive Language Detection In Danish"
 author: Aske Bredahl & Johan Horsmans
 output: github_document
 ---
+## Introduction:
+This is the R-code-tutorial for the bachelor project of Aske Bredahl & Johan Horsmans (link to assignemnt: [INSERT LINK]). In this tutorial we will train the following models: Support Vector Machines, Naive Bayes, Logistic Regression, LSTM Neural Network, Bi-directional LSTM Neural Network and a Convoluted Neural Network. Furthermore, we will design the ensemble support system described in the assignment. For the Python-code follow this link: [INSERT LINK].
 
+
+## Step 0: Loading packages
 ```{r setup}
-#Loading required packages
-
+# Loading/installing the required packages:
 library(pacman)
-p_load(readr, tidyverse,rsample,recipes, textrecipes, parsnip, yardstick,workflows, discrim,kernlab,stringr, tm, ggplot2, GGally, e1071, caret,stopwords, stringi, SnowballC,fastmatch, parsnip, keras)
+p_load(readr, tidyverse,rsample,recipes, textrecipes, parsnip, yardstick,workflows, discrim,kernlab,stringr, tm, ggplot2, GGally, e1071, caret,stopwords, stringi, SnowballC,fastmatch, parsnip, keras, tensorflow)
 ```
 
-```{r reading data and preprocessing}
-
+## Step 1: Loading data:
+```{r reading data}
+# Defining function to read the data:
 loading_data <- function(path) {
   read_delim(path, "\t", escape_double = FALSE, trim_ws = TRUE)
 }
 
+# Loading the training- and testing data ("corpus" & "testing", respectively):
 corpus <- loading_data("offenseval-da-training-v1.tsv") %>% 
           mutate(Id = id,label = factor(subtask_a),text=tweet) %>% 
           na.omit()
 testing<-loading_data("offenseval-da-test-v1.tsv") %>% 
           mutate(Id = id,label = factor(subtask_a),text=tweet) %>% 
           na.omit()
+```
 
-
-###CLEANING####
-
-# Remove stopwords
-testing$text<-tolower(testing$text) 
+## Step 2: Preprocessing:
+```{r preprocessing data}
+# Make text lowercase
 corpus$text<-tolower(corpus$text) 
 
+# Remove stopwords:
 stopwords_regex = paste(stopwords("da",source= "snowball"), collapse = '\\b|\\b')
 stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
 corpus$text = stringr::str_replace_all(corpus$text, stopwords_regex, '')
-# remove numbers
+
+# Eemove numbers:
 corpus$text <-  removeNumbers(corpus$text)
-# Stem words
+
+# Stem words:
 corpus$text <-  wordStem(corpus$text, language = "danish")
-#repeat for test data
+
+# remove punctuation
+corpus$text<-removePunctuation(corpus$text)
+
+#repeat same procedures for test data
+testing$text<-tolower(testing$text) 
 stopwords_regex = paste(stopwords("da",source= "snowball"), collapse = '\\b|\\b')
 stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
 testing$text = stringr::str_replace_all(testing$text, stopwords_regex, '')
-# remove numbers
 testing$text <-  removeNumbers(testing$text)
-# Stem words
 testing$text <-  wordStem(testing$text, language = "danish")
-# remove punctuation
 testing$text<-removePunctuation(testing$text)
-corpus$text<-removePunctuation(corpus$text)
 
-
-###CLEANING###
-
-
+# Remove original data columns:
 corpus<-corpus[,4:6]
-
 testing<-testing[,4:6]
 
+# Make new dataframes to avoid overwriting:
 training_set <- corpus
 test_set <- testing
-#
 
+#Inspect training data:
+head(corpus)
+```
 
-# General toxen recipe
+## Step 3: Naive Bayes, Logistic Regression and SVM using tidymodels
+
+We start off creating the text treatment recipe:
+```{r process data for tidymodels}
+# Create text recipe:
 text_recipe <- recipe(label ~ ., data = training_set) %>% 
   update_role(Id, new_role = "ID") %>% 
   step_tokenize(text, engine = "spacyr", token = "words") %>%
@@ -74,14 +85,14 @@ text_recipe <- recipe(label ~ ., data = training_set) %>%
 #
 
 # NGRAM recipie
-text_recipe <- recipe(label ~ ., data = training_set) %>% 
-  update_role(Id, new_role = "ID") %>% 
-  step_tokenize(text) %>%
-  step_ngram(text, num_tokens = 5) %>%
+#text_recipe <- recipe(label ~ ., data = training_set) %>% 
+ # update_role(Id, new_role = "ID") %>% 
+  #step_tokenize(text) %>%
+  #step_ngram(text, num_tokens = 5) %>%
  ## step_stopwords(text) %>% 
   ##step_lemma(text) %>%
-  step_tokenfilter(text, max_tokens = 100) %>%
-  step_tfidf(text)
+  #step_tokenfilter(text, max_tokens = 100) %>%
+  #step_tfidf(text)
 
 #TRI GRAM:
 #rec <- recipe(~ text, data = abc_tibble) %>%
@@ -89,200 +100,68 @@ text_recipe <- recipe(label ~ ., data = training_set) %>%
   #step_ngram(text, num_tokens = 3) %>%
   #step_tokenfilter(text) %>%
   #step_tf(text)
-
 ```
 
+We now set the model specification (tidymodels framework) to make them ready for classification:
 ```{r}
 text_model_log_spec <- logistic_reg() %>% set_engine("glm") %>% set_mode("classification")
 text_model_NB_spec <- naive_Bayes() %>% set_engine("naivebayes") %>% set_mode("classification")
 text_model_svm_spec <- svm_poly("classification") %>% set_engine("kernlab")
 ```
 
+We combine the model and the text processing recipe using worksflows:
 ```{r}
 text_model_log_wf <- workflows::workflow() %>% add_recipe(text_recipe) %>% add_model(text_model_log_spec)
 text_model_NB_wf <- workflows::workflow() %>% add_recipe(text_recipe) %>% add_model(text_model_NB_spec)
 text_model_svm_wf <- workflows::workflow() %>% add_recipe(text_recipe) %>% add_model(text_model_svm_spec)
-
 ```
 
+## Step 4: Fitting:
 ```{r}
+#Fit the models on the training data:
 fit_log_model <- fit(text_model_log_wf, training_set)
 fit_NB_model <- fit(text_model_NB_wf, training_set)
 fit_svm_model <- fit(text_model_svm_wf, training_set)
+```
+
+## Step 5: Predictions:
+
+We make the models predict the classes of the test data: 
+```{r}
+predictions_log <- predict(fit_log_model, test_set) # Classifications
+predictions_log$raw_log <- predict(fit_log_model, test_set,type="prob") # Raw probabilities
+
+predictions_NB <- predict(fit_NB_model, test_set,type="class") # Classifications
+predictions_NB$raw_NB <- predict(fit_NB_model, test_set,type="prob") # Raw probabilities
+
+predictions_SVM <- stats::predict(fit_svm_model, test_set,type="class") # Classifications
+predictions_SVM$raw_svm <- stats::predict(fit_svm_model, test_set,type="prob") # Raw probabilities
 
 ```
 
+## Step 6: Evaluate
+
+# Logistic Regression:
 ```{r}
-predictions_log <- predict(fit_log_model, test_set)
-predictions_log$raw_log <- predict(fit_log_model, test_set,type="prob")
-
-predictions_NB <- predict(fit_NB_model, test_set,type="class")
-predictions_NB$raw_NB <- predict(fit_NB_model, test_set,type="prob")
-
-predictions_SVM <- stats::predict(fit_svm_model, test_set,type="class")
-predictions_SVM$raw_svm <- stats::predict(fit_svm_model, test_set,type="prob")
-
-
-
-#testing$predictions<-predictions_NB
-
-
-#Evaluate
-bind_cols(test_set,predictions_log) %>% conf_mat(label, .pred_class) 
 bind_cols(test_set,predictions_log) %>% accuracy(truth = label, estimate = .pred_class)
+bind_cols(test_set,predictions_log) %>% conf_mat(label, .pred_class) 
+```
 
-bind_cols(test_set,predictions_NB) %>% conf_mat(label, .pred_class) 
+# Naive Bayes
+```{r}
 bind_cols(test_set,predictions_NB) %>% accuracy(truth = label, estimate = .pred_class)
+bind_cols(test_set,predictions_NB) %>% conf_mat(label, .pred_class) 
+```
 
-bind_cols(test_set,predictions_SVM) %>% conf_mat(label, .pred_class) 
+SVM
+```{r}
 bind_cols(test_set,predictions_SVM) %>% accuracy(truth = label, estimate = .pred_class)
-
-
+bind_cols(test_set,predictions_SVM) %>% conf_mat(label, .pred_class) 
 ```
 
-Ensemble averaging pipeline:
-```{r}
-#Load BERT data:
-Bert_results<-read_csv("OG_BERT_RESULTS.csv")
-#testing$BERT_not_prob<-Bert_results$`0`
-#testing$BERT_off_prob<-Bert_results$`1`
+## Neural Networks:
 
-#Create ensemble with raw probs of other models:
-Ensemble_probabilities<-predictions_SVM$raw_svm
-Ensemble_probabilities$SVM<-predictions_SVM$raw_svm
-Ensemble_probabilities<-Ensemble_probabilities[,3]
-Ensemble_probabilities$NB<-predictions_NB$raw_NB
-Ensemble_probabilities$log<-predictions_log$raw_log
-
-
-#Define empty columns in testing set
-Ensemble_probabilities$ensemble_plus_bert_probs_off<-1
-Ensemble_probabilities$ensemble_plus_bert_probs_not<-1
-Ensemble_probabilities$avg_preds_bert_plus_ensemble<-1
-testing$support_system<-1
-Ensemble_probabilities$bertpreds<-1
-Ensemble_probabilities$bert_off<-Bert_results$`1`
-Ensemble_probabilities$bert_not<-Bert_results$`0`
-
-
-#Calculating average OFF prob and class prediction
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  Ensemble_probabilities$ensemble_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i]) / 3
-#}
-
-#Calculating average NOT prob
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  testing$ensemble_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i]) / 3
-#  testing$avg_preds[i] <- ifelse(testing$ensemble_probs_off[i] > 0.5, 1, 0)
-#  }
-
-
-#Calculating average OFF BERT+Ensemble prob
-for (i in 1:nrow(Ensemble_probabilities)){
-  Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i] + Bert_results$`1`[i]) / 4
-}
-
-#Calculating average NOT BERT+Ensemble prob and making binary classification
-for (i in 1:nrow(Ensemble_probabilities)){
-  Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i] + Bert_results$`0`[i]) / 4
-  Ensemble_probabilities$avg_preds_bert_plus_ensemble[i] <- ifelse(Ensemble_probabilities$ensemble_plus_bert_probs_off[i] > 0.5, 1, 0)
-}
-
-#Calculate binary BERT classification
-for (i in 1:nrow(Ensemble_probabilities)){
-  Ensemble_probabilities$bertpreds[i] <- ifelse(Ensemble_probabilities$bert_off[i] > 0.5, 1, 0)
-}
-
-##ENSEMBLE SUPPORT SYSTEM##
-
-# Making support system integrating "unsure" offensive classifications (by BERT)
-for (i in 1:nrow(testing)){
-  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_off[i] > 0.5 & Ensemble_probabilities$bert_off[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
-}
-
-# Same but for NOT
-for (i in 1:nrow(testing)){
-  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_not[i] > 0.5 & Ensemble_probabilities$bert_not[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
-}
-
-(Ensemble_probabilities$SVM$.pred_NOT[151]+Ensemble_probabilities$NB$.pred_NOT[151]+Ensemble_probabilities$log$.pred_NOT[151])/3
-
-(Ensemble_probabilities$SVM$.pred_OFF[151]+Ensemble_probabilities$NB$.pred_OFF[151]+Ensemble_probabilities$log$.pred_OFF[151])/3
-
-```
-
-
-##TEST only with NB (to see if 151 changes)
-
-```{r}
-#Load BERT data:
-Bert_results<-read_csv("OG_BERT_RESULTS.csv")
-#testing$BERT_not_prob<-Bert_results$`0`
-#testing$BERT_off_prob<-Bert_results$`1`
-
-#Create ensemble with raw probs of other models:
-Ensemble_probabilities<-predictions_NB$raw_NB
-Ensemble_probabilities$SVM<-predictions_SVM$raw_svm
-Ensemble_probabilities<-Ensemble_probabilities[,3]
-Ensemble_probabilities$NB<-predictions_NB$raw_NB
-Ensemble_probabilities$log<-predictions_log$raw_log
-
-
-#Define empty columns in testing set
-Ensemble_probabilities$ensemble_plus_bert_probs_off<-1
-Ensemble_probabilities$ensemble_plus_bert_probs_not<-1
-Ensemble_probabilities$avg_preds_bert_plus_ensemble<-1
-testing$support_system<-1
-Ensemble_probabilities$bertpreds<-1
-Ensemble_probabilities$bert_off<-Bert_results$`1`
-Ensemble_probabilities$bert_not<-Bert_results$`0`
-
-
-#Calculating average OFF prob and class prediction
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  Ensemble_probabilities$ensemble_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i]) / 3
-#}
-
-#Calculating average NOT prob
-#for (i in 1:nrow(Ensemble_probabilities)){
-#  testing$ensemble_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i]) / 3
-#  testing$avg_preds[i] <- ifelse(testing$ensemble_probs_off[i] > 0.5, 1, 0)
-#  }
-
-
-#Calculating average OFF BERT+Ensemble prob
-for (i in 1:nrow(Ensemble_probabilities)){
-  Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <- (Ensemble_probabilities$NB$.pred_OFF[i] + Bert_results$`1`[i]) / 2
-}
-
-#Calculating average NOT BERT+Ensemble prob and making binary classification
-for (i in 1:nrow(Ensemble_probabilities)){
-  Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <- (Ensemble_probabilities$NB$.pred_NOT[i] + Bert_results$`0`[i]) / 2
-  Ensemble_probabilities$avg_preds_bert_plus_ensemble[i] <- ifelse(Ensemble_probabilities$ensemble_plus_bert_probs_off[i] > 0.5, 1, 0)
-}
-
-#Calculate binary BERT classification
-for (i in 1:nrow(Ensemble_probabilities)){
-  Ensemble_probabilities$bertpreds[i] <- ifelse(Ensemble_probabilities$bert_off[i] > 0.5, 1, 0)
-}
-
-##ENSEMBLE SUPPORT SYSTEM##
-
-# Making support system integrating "unsure" offensive classifications (by BERT)
-for (i in 1:nrow(testing)){
-  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_off[i] > 0.5 & Ensemble_probabilities$bert_off[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
-}
-
-# Same but for NOT
-for (i in 1:nrow(testing)){
-  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_not[i] > 0.5 & Ensemble_probabilities$bert_not[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
-}
-
-(Ensemble_probabilities$SVM$.pred_NOT[151]+Ensemble_probabilities$NB$.pred_NOT[151]+Ensemble_probabilities$log$.pred_NOT[151])/3
-
-(Ensemble_probabilities$SVM$.pred_OFF[151]+Ensemble_probabilities$NB$.pred_OFF[151]+Ensemble_probabilities$log$.pred_OFF[151])/3
-```
-
+## Step 1: Loading data
 ```{r}
 loading_data <- function(path) {
   read_delim(path, "\t", escape_double = FALSE, trim_ws = TRUE)
@@ -295,102 +174,110 @@ training <- loading_data("offenseval-da-training-v1.tsv") %>%
 testing<-loading_data("offenseval-da-test-v1.tsv") %>% 
           mutate(Id = id,tag = factor(subtask_a),text=tweet) %>% 
           na.omit()
+```
 
-
-###CLEANING####
-# Remove stopwords
-testing$text<-tolower(testing$text) 
+## Step 2: Preprocessing:
+```{r}
+# Make text lowercase:
 training$text<-tolower(training$text) 
+
+# Remove stopwords
 stopwords_regex = paste(stopwords("da",source= "snowball"), collapse = '\\b|\\b')
 stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
 training$text = stringr::str_replace_all(training$text, stopwords_regex, '')
-# remove numbers
+
+# Remove numbers
 training$text <-  removeNumbers(training$text)
+
 # Stem words
 training$text <-  wordStem(training$text, language = "danish")
-#repeat for test data
+
+# Remove punctuatuin:
+training$text<-removePunctuation(training$text)
+
+# Repeat for test data
+testing$text<-tolower(testing$text) 
 stopwords_regex = paste(stopwords("da",source= "snowball"), collapse = '\\b|\\b')
 stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
 testing$text = stringr::str_replace_all(testing$text, stopwords_regex, '')
-# remove numbers
 testing$text <-  removeNumbers(testing$text)
-# Stem words
 testing$text <-  wordStem(testing$text, language = "danish")
-# remove punctuation
 testing$text<-removePunctuation(testing$text)
-training$text<-removePunctuation(training$text)
 
-
+# Remove original columns
 training<-training[,4:6]
 testing<-testing[,4:6]
 
+# Turn labels into factors to make it interpretable by Keras:
 training$tag<-as.numeric(training$tag)-1
 testing$tag<-as.numeric(testing$tag)-1
 
-glimpse(training)
-
-
-###
-
+# Inspect training data:
+head(training)
 ```
 
-```{r}
-#train
+## Format data for Keras framework:
 
+bla bla bla
+```{r}
+# Train
 text <- training$text
 
 max_features <- 1000
 tokenizer <- text_tokenizer(num_words = max_features)
 
-#test
-
+# Test
 text_test <- testing$text
-
 max_features_test <- 1000
 tokenizer_test <- text_tokenizer(num_words = max_features)
 ```
 
+bla bla bla
 ```{r}
-#Train
+# Train
 tokenizer %>% 
   fit_text_tokenizer(text)
 
-#Test
+# Test
 tokenizer_test %>% 
   fit_text_tokenizer(text_test)
 ```
 
+bla bla bla
 ```{r}
+# Train
 tokenizer$document_count
-tokenizer_test$document_count
 
+# Test
+tokenizer_test$document_count
 ```
 
+bla bla bla
 ```{r}
+# Train
 tokenizer$word_index %>%
   head()
 
+# Test
 tokenizer_test$word_index %>%
   head()
-
 ```
 
+bla bla bla
 ```{r}
+# Train
 text_seqs <- texts_to_sequences(tokenizer, text)
-
 text_seqs %>%
   head()
 
-#Test
+# Test
 text_seqs_test <- texts_to_sequences(tokenizer_test, text_test)
-
 text_seqs_test %>%
   head()
 ```
 
-
+## Step 4: Overall Model specifications (revisit):
 ```{r}
-##
 maxlen <- 100
 batch_size <- 32
 embedding_dims <- 50
@@ -398,89 +285,90 @@ filters <- 64
 kernel_size <- 3
 hidden_dims <- 50
 epochs <- 5
-
 ```
 
+bla bla bla
 ```{r}
+# Train
 x_train <- text_seqs %>%
   pad_sequences(maxlen = maxlen)
 dim(x_train)
 
-#Test
+# Test
 x_test <- text_seqs_test %>%
   pad_sequences(maxlen = maxlen)
 dim(x_test)
 ```
 
+bla bla bla
 ```{r}
+# Train
 y_train <- training$tag
 length(y_train)
 
-#Test
+# Test
 y_test <- testing$tag
 length(y_test)
 
+# Bla bla
 y_test<-y_test
 y_train<-y_train
 ```
 
 ##LSTM
 
+## Step 1: Define model in Keras
+
 ```{r}
-model <- keras_model_sequential()
-model %>%
+model_lstm <- keras_model_sequential()
+model_lstm %>%
   layer_embedding(input_dim = max_features, output_dim = 128) %>% 
   layer_lstm(units = 64, dropout = 0.2, recurrent_dropout = 0.2) %>% 
   layer_dense(units = 1, activation = 'sigmoid')
 
-```
-
-```{r}
 # Try using different optimizers and different optimizer configs
-model %>% compile(
+model_lstm %>% compile(
   loss = 'binary_crossentropy',
   optimizer = 'adam',
   metrics = c('accuracy')
 )
+
 ```
 
+## Step 2: Fit model:
 ```{r}
-
-model %>% fit(
+model_lstm %>% fit(
   x_train, y_train,
   batch_size = batch_size,
-  epochs = 15,
+  epochs = 5,
   validation_data = list(x_test, y_test)
-
 )
 ```
 
+## Step 3: Evaluate:
 ```{r}
-scores <- model %>% tensorflow::evaluate(
+scores <- model_lstm %>% tensorflow::evaluate(
   x_test, y_test,
   batch_size = batch_size
 )
 
 
-
-y_test
-x_test
+#y_test
+#x_test
 
 #testing$predict<-predict_classes(model, testing$tag)
 
+neural_probs <- data.frame(predict_LSTM = predict_classes(model_lstm, x_test))
+neural_probs$raw_probs_off_LSTM<-predict_proba(model_lstm, x_test)
+neural_probs$raw_probs_not_LSTM<-1-neural_probs$raw_probs_off_LSTM
 
-
-testing$predict<-predict_classes(model, x_test) #Predict class
-Raw_probs<-predict_proba(model, x_test) #Predict raw probabilites (prob of tweet = OFF)
-
-testing$raw_probs_off<-predict_proba(model, x_test)
-testing$raw_probs_not<-1-testing$raw_probs_off
-
-#testing<-testing[,1:3]
 ```
 
-#CNN:
+## CNN:
 
+## Step 1: Set model specifications
+
+Bla bla
 ```{r}
 # Embedding
 max_features = 20000
@@ -488,11 +376,12 @@ maxlen = 100
 embedding_size = 128
 
 #2nd run
-max_features = 20000
-maxlen = 100
-embedding_size = 128
+#max_features = 20000
+#maxlen = 100
+#embedding_size = 128
 ```
 
+bla bla bla
 ```{r}
 # Convolution
 kernel_size = 5
@@ -500,37 +389,37 @@ filters = 64
 pool_size = 4
 
 #2nd run
-kernel_size = 2
-filters = 32
-pool_size = 4
+#kernel_size = 2
+#filters = 32
+#pool_size = 4
 ```
 
+bla bla bla
 ```{r}
 # LSTM
 lstm_output_size = 70
 
 #2nd run
-
-lstm_output_size = 70
+#lstm_output_size = 70
 
 ```
 
+bla bla bla 
 ```{r}
 # Training
 batch_size = 30
-epochs = 15
+epochs = 5
 
 #2nd run
-batch_size = 15
-epochs = 5
+#batch_size = 15
+#epochs = 5
 ```
 
 ```{r}
 # Defining Model ------------------------------------------------------
+model_cnn <- keras_model_sequential()
 
-model <- keras_model_sequential()
-
-model %>%
+model_cnn %>%
   layer_embedding(max_features, embedding_size, input_length = maxlen) %>%
   layer_dropout(0.25) %>%
   layer_conv_1d(
@@ -549,35 +438,37 @@ model %>%
 optimizer_adam(
   lr = 0.001)
 
-model %>% compile(
+model_cnn %>% compile(
   loss = "binary_crossentropy",
   optimizer = "adam",
   metrics = c("accuracy","Precision","Recall")
 )
 ```
 
+## Step 2: Fit model:
 ```{r}
-model %>% fit(
+model_cnn %>% fit(
   x_train, y_train,
   batch_size = batch_size,
   epochs = epochs,
   validation_data = list(x_test, y_test)
 )
+```
 
-scores <- model %>% tensorflow::evaluate(
+```{r}
+scores <- model_cnn %>% tensorflow::evaluate(
   x_test, y_test,
   batch_size = batch_size
 )
 
-testing$predict<-predict_classes(model, x_test) #Predict class
-Raw_probs<-predict_proba(model, x_test) #Predict raw probabilites (prob of tweet = OFF)
-
-
-
+neural_probs$predict_CNN<-predict_classes(model_cnn, x_test) #Predict class
+neural_probs$raw_probs_off_CNN<-predict_proba(model_cnn, x_test) #Predict raw probabilites (prob of tweet = OFF)
+neural_probs$raw_probs_not_CNN<-1-neural_probs$raw_probs_off_CNN
 ```
 
-#Bi-directional LSTM
+## Bi-directional LSTM
 
+## Step 1: Set model specifications:
 ```{r}
 # Define maximum number of input features
 max_features <- 20000
@@ -591,13 +482,12 @@ maxlen <- 100
 
 ```{r}
 batch_size <- 32
-
 ```
 
 ```{r}
 #Initialize model
-model <- keras_model_sequential()
-model %>%
+model_bilstm <- keras_model_sequential()
+model_bilstm %>%
   # Creates dense embedding layer; outputs 3D tensor
   # with shape (batch_size, sequence_length, output_dim)
   layer_embedding(input_dim = max_features, 
@@ -611,7 +501,7 @@ model %>%
 
 ```{r}
 # Try using different optimizers and different optimizer configs
-model %>% compile(
+model_bilstm %>% compile(
   loss = 'binary_crossentropy',
   optimizer = 'adam',
   metrics = c('accuracy',"Recall","Precision")
@@ -630,18 +520,182 @@ callback_reduce_lr_on_plateau(
 )
 ```
 
+## Step 2: Fit model:
 ```{r}
 # Train model over four epochs
-model %>% fit(
+model_bilstm %>% fit(
   x_train, y_train,
   batch_size = batch_size,
-  epochs = 15,
+  epochs = 5,
   validation_data = list(x_test, y_test)
 )
 
-testing$predict<-predict_classes(model, x_test) #Predict class
-Raw_probs<-predict_proba(model, x_test) #Predict raw probabilites (prob of tweet = OFF)
+```
 
+## Step 3: Evaluate
+```{r}
+neural_probs$predict_BILSTM<-predict_classes(model_bilstm, x_test) #Predict class
+neural_probs$raw_probs_off_BILSTM<-predict_proba(model_bilstm, x_test) #Predict raw probabilites (prob of tweet = OFF)
+neural_probs$raw_probs_not_BILSTM<-1-neural_probs$raw_probs_off_BILSTM
+```
+
+
+## PART 3: Ensembling
+
+Ensemble averaging pipeline:
+
+We start of by loading the data from our BERT models (see following markdown for Python script)
+```{r}
+#Load BERT data:
+Bert_results<-read_csv("OG_BERT_RESULTS.csv")
+#testing$BERT_not_prob<-Bert_results$`0`
+#testing$BERT_off_prob<-Bert_results$`1`
+
+#Create ensemble with raw probs of other models:
+Ensemble_probabilities<-predictions_SVM$raw_svm
+Ensemble_probabilities$SVM<-predictions_SVM$raw_svm
+Ensemble_probabilities<-Ensemble_probabilities[,3]
+Ensemble_probabilities$NB<-predictions_NB$raw_NB
+Ensemble_probabilities$log<-predictions_log$raw_log
+Ensemble_probabilities$cnn_pred_off<-neural_probs$raw_probs_off_CNN
+Ensemble_probabilities$cnn_pred_not<-neural_probs$raw_probs_not_CNN
+Ensemble_probabilities$lstm_pred_off<-neural_probs$raw_probs_off_LSTM
+Ensemble_probabilities$lstm_pred_not<-neural_probs$raw_probs_not_LSTM
+Ensemble_probabilities$bilstm_pred_off<-neural_probs$raw_probs_off_BILSTM
+Ensemble_probabilities$bilstm_pred_not<-neural_probs$raw_probs_not_BILSTM
+
+
+#Define empty columns in ensemble probabilites set
+Ensemble_probabilities$ensemble_plus_bert_probs_off<-1
+Ensemble_probabilities$ensemble_plus_bert_probs_not<-1
+Ensemble_probabilities$avg_preds_bert_plus_ensemble<-1
+testing$support_system<-1
+Ensemble_probabilities$bertpreds<-1 #This is just for inspection
+Ensemble_probabilities$bert_off<-Bert_results$`1`
+Ensemble_probabilities$bert_not<-Bert_results$`0`
+
+
+#Calculating average OFF prob and class prediction
+#for (i in 1:nrow(Ensemble_probabilities)){
+#  Ensemble_probabilities$ensemble_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i]) / 3
+#}
+
+#Calculating average NOT prob
+#for (i in 1:nrow(Ensemble_probabilities)){
+#  testing$ensemble_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i]) / 3
+#  testing$avg_preds[i] <- ifelse(testing$ensemble_probs_off[i] > 0.5, 1, 0)
+#  }
+
+
+#Calculating average OFF BERT+Ensemble prob
+for (i in 1:nrow(Ensemble_probabilities)){
+  Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i] + Bert_results$`1`[i] + Ensemble_probabilities$cnn_pred_off + Ensemble_probabilities$lstm_pred_off + Ensemble_probabilities$bilstm_pred_off) / 7
+}
+
+#Calculating average NOT BERT+Ensemble prob and making binary classification
+for (i in 1:nrow(Ensemble_probabilities)){
+  Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i] + Bert_results$`0`[i] + Ensemble_probabilities$cnn_pred_not + Ensemble_probabilities$lstm_pred_not + Ensemble_probabilities$bilstm_pred_not) / 7
+}
+
+for (i in 1:nrow(Ensemble_probabilities)){
+Ensemble_probabilities$avg_preds_bert_plus_ensemble[i] <- ifelse(Ensemble_probabilities$ensemble_plus_bert_probs_off[i] > 0.5, 1, 0)
+}
+
+
+#Calculate binary BERT classification
+for (i in 1:nrow(Ensemble_probabilities)){
+  Ensemble_probabilities$bertpreds[i] <- ifelse(Ensemble_probabilities$bert_off[i] > 0.5, 1, 0)
+}
+
+##ENSEMBLE SUPPORT SYSTEM##
+
+# Making support system integrating "unsure" offensive classifications (by BERT)
+for (i in 1:nrow(testing)){
+  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_off[i] > 0.5 & Ensemble_probabilities$bert_off[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
+}
+
+# Same but for NOT
+for (i in 1:nrow(testing)){
+  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_not[i] > 0.5 & Ensemble_probabilities$bert_not[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
+}
+
+# How many changed classifications:
+length(Ensemble_probabilities$bertpreds[Ensemble_probabilities$bertpreds==1])
+length(testing$support_system[testing$support_system==1])
+
+
+```
+
+
+##TEST only with NB (to see if 151 changes)
+
+```{r}
+#Load BERT data:
+#Bert_results<-read_csv("OG_BERT_RESULTS.csv")
+#testing$BERT_not_prob<-Bert_results$`0`
+#testing$BERT_off_prob<-Bert_results$`1`
+
+#Create ensemble with raw probs of other models:
+#Ensemble_probabilities<-predictions_NB$raw_NB
+#Ensemble_probabilities$SVM<-predictions_SVM$raw_svm
+#Ensemble_probabilities<-Ensemble_probabilities[,3]
+#Ensemble_probabilities$NB<-predictions_NB$raw_NB
+#Ensemble_probabilities$log<-predictions_log$raw_log
+
+
+#Define empty columns in testing set
+#Ensemble_probabilities$ensemble_plus_bert_probs_off<-1
+#Ensemble_probabilities$ensemble_plus_bert_probs_not<-1
+#Ensemble_probabilities$avg_preds_bert_plus_ensemble<-1
+#testing$support_system<-1
+#Ensemble_probabilities$bertpreds<-1
+#Ensemble_probabilities$bert_off<-Bert_results$`1`
+#Ensemble_probabilities$bert_not<-Bert_results$`0`
+
+
+#Calculating average OFF prob and class prediction
+#for (i in 1:nrow(Ensemble_probabilities)){
+#  Ensemble_probabilities$ensemble_probs_off[i] <- (Ensemble_probabilities$SVM$.pred_OFF[i] + Ensemble_probabilities$NB$.pred_OFF[i] + Ensemble_probabilities$log$.pred_OFF[i]) / 3
+#}
+
+#Calculating average NOT prob
+#for (i in 1:nrow(Ensemble_probabilities)){
+#  testing$ensemble_probs_not[i] <- (Ensemble_probabilities$SVM$.pred_NOT[i] + Ensemble_probabilities$NB$.pred_NOT[i] + Ensemble_probabilities$log$.pred_NOT[i]) / 3
+#  testing$avg_preds[i] <- ifelse(testing$ensemble_probs_off[i] > 0.5, 1, 0)
+#  }
+
+
+#Calculating average OFF BERT+Ensemble prob
+#for (i in 1:nrow(Ensemble_probabilities)){
+#  Ensemble_probabilities$ensemble_plus_bert_probs_off[i] <- #(Ensemble_probabilities$NB$.pred_OFF[i] + Bert_results$`1`[i]) / 2
+#}
+
+#Calculating average NOT BERT+Ensemble prob and making binary classification
+#for (i in 1:nrow(Ensemble_probabilities)){
+#  Ensemble_probabilities$ensemble_plus_bert_probs_not[i] <- #(Ensemble_probabilities$NB$.pred_NOT[i] + Bert_results$`0`[i]) / 2
+#  Ensemble_probabilities$avg_preds_bert_plus_ensemble[i] <- ifelse(Ensemble_probabilities$ensemble_plus_bert_probs_off[i] > 0.5, 1, 0)
+#}
+
+#Calculate binary BERT classification
+#for (i in 1:nrow(Ensemble_probabilities)){
+#  Ensemble_probabilities$bertpreds[i] <- ifelse(Ensemble_probabilities$bert_off[i] > 0.5, 1, 0)
+#}
+
+##ENSEMBLE SUPPORT SYSTEM##
+
+# Making support system integrating "unsure" offensive classifications (by BERT)
+#for (i in 1:nrow(testing)){
+#  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_off[i] > 0.5 & Ensemble_probabilities$bert_off[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
+#}
+
+# Same but for NOT
+#for (i in 1:nrow(testing)){
+#  testing$support_system[i]<-ifelse(Ensemble_probabilities$bert_not[i] > 0.5 & Ensemble_probabilities$bert_not[i] < 0.65, Ensemble_probabilities$avg_preds_bert_plus_ensemble[i], Ensemble_probabilities$bertpreds[i])
+#}
+
+#(Ensemble_probabilities$SVM$.pred_NOT[151]+Ensemble_probabilities$NB$.pred_NOT[151]+Ensemble_probabilities$log$.pred_NOT[151])/3
+
+#(Ensemble_probabilities$SVM$.pred_OFF[151]+Ensemble_probabilities$NB$.pred_OFF[151]+Ensemble_probabilities$log$.pred_OFF[151])/3
 
 ```
 
