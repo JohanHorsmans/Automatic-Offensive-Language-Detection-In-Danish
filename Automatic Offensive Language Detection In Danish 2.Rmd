@@ -1,7 +1,7 @@
 ---
-title: "Automatic Offensive Language Detection In Danish"
+title: "Automatic Offensive Language Detection In Danish 2"
 author: Aske Bredahl & Johan Horsmans
-output: md_document
+output: github_document
 ---
 ## Introduction:
 This is the R-code-tutorial for the bachelor project of Aske Bredahl & Johan Horsmans (link to assignemnt: [INSERT LINK]). In this tutorial we will train the following models: Support Vector Machines, Naive Bayes, Logistic Regression, LSTM Neural Network, Bi-directional LSTM Neural Network and a Convoluted Neural Network. Furthermore, we will design the ensemble support system described in the assignment. For the Python-code follow this link: [INSERT LINK].
